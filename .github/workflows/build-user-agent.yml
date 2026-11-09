@@ -1,0 +1,59 @@
+name: Build ClashX Meta with configurable User-Agent
+
+on:
+  push:
+    branches:
+      - codex/clashx-meta-user-agent
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: xcode-27
+    env:
+      MIHOMO_TAG: v1.19.33
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: patch
+
+      - uses: actions/checkout@v6
+        with:
+          repository: MetaCubeX/ClashX.Meta
+          ref: v1.4.47
+          path: source
+          fetch-depth: 0
+
+      - name: Apply User-Agent patch
+        working-directory: source
+        run: git apply ../patch/ClashX.Meta-v1.4.47-User-Agent.patch
+
+      - name: Install Mihomo core and resolve packages
+        working-directory: source
+        run: |
+          bash install_dependency.sh "$MIHOMO_TAG"
+          xcodebuild -resolvePackageDependencies -project ClashX.xcodeproj
+
+      - name: Prepare app version
+        working-directory: source
+        run: |
+          /usr/libexec/PlistBuddy -c "Set CFBundleVersion $(git rev-list --count origin/master..origin/meta)" ClashX/Info.plist
+          /usr/libexec/PlistBuddy -c "Set CFBundleShortVersionString $(git describe --tags --abbrev=0)" ClashX/Info.plist
+          /usr/libexec/PlistBuddy -c "Add coreVersion string $MIHOMO_TAG" ClashX/Info.plist
+          /usr/libexec/PlistBuddy -c "Add gitBranch string $GITHUB_REF_NAME" ClashX/Info.plist
+          /usr/libexec/PlistBuddy -c "Add gitCommit string ${GITHUB_SHA::7}" ClashX/Info.plist
+          /usr/libexec/PlistBuddy -c "Add buildTime string $(date +%Y-%m-%d\ %H:%M)" ClashX/Info.plist
+
+      - name: Archive the app
+        working-directory: source
+        run: xcodebuild archive -project ClashX.xcodeproj -scheme 'ClashX Meta' -archivePath archive/ClashX.xcarchive -showBuildTimingSummary
+
+      - name: Package the app
+        working-directory: source
+        run: ditto -c -k --sequesterRsrc --keepParent 'archive/ClashX.xcarchive/Products/Applications/ClashX Meta.app' 'ClashX Meta.zip'
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ClashX-Meta-v1.4.47-User-Agent
+          path: source/ClashX Meta.zip
+          if-no-files-found: error
